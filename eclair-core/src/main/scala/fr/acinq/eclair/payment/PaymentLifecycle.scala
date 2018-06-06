@@ -171,6 +171,7 @@ class PaymentLifecycle(sourceNodeId: PublicKey, router: ActorRef, register: Acto
 
   def reply(to: ActorRef, e: PaymentResult) = {
     to ! e
+    context.parent ! e
     context.system.eventStream.publish(e)
   }
 
@@ -193,7 +194,8 @@ object PaymentLifecycle {
                          finalCltvExpiry: Long = Channel.MIN_CLTV_EXPIRY,
                          maxAttempts: Int = 5,
                          randomize: Option[Boolean] = None,
-                         routeParams: Option[RouteParams] = None) {
+                         routeParams: Option[RouteParams] = None,
+                         async: Boolean=false) {
     require(amountMsat > 0, s"amountMsat must be > 0")
   }
   case class CheckPayment(paymentHash: BinaryData)
