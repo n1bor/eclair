@@ -36,6 +36,7 @@ import de.heikoseeberger.akkahttpjson4s.Json4sSupport.ShouldWritePretty
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.{BinaryData, MilliSatoshi, Satoshi}
 import fr.acinq.eclair.channel._
+import fr.acinq.eclair.db.Payment
 import fr.acinq.eclair.io.Peer.{GetPeerInfo, PeerInfo}
 import fr.acinq.eclair.io.{NodeURI, Peer}
 import fr.acinq.eclair.payment.PaymentLifecycle._
@@ -58,6 +59,7 @@ case class JsonRPCRes(result: AnyRef, error: Option[Error], id: String)
 case class Status(node_id: String)
 case class GetInfoResponse(nodeId: PublicKey, alias: String, port: Int, chainHash: BinaryData, blockHeight: Int, publicAddresses: Seq[NodeAddress])
 case class AuditResponse(sent: Seq[PaymentSent], received: Seq[PaymentReceived], relayed: Seq[PaymentRelayed])
+case class CheckPaymentDetailedResponse(payment: Option[Payment])
 trait RPCRejection extends Rejection {
   def requestId: String
 }
@@ -265,13 +267,13 @@ trait Service extends Logging {
                         // user manually sets the payment information
                         case JInt(amountMsat) :: JString(paymentHash) :: JString(nodeId) :: Nil =>
                           (Try(BinaryData(paymentHash)), Try(PublicKey(nodeId))) match {
-                            case (Success(ph), Success(pk)) => completeRpcFuture(req.id, (paymentInitiator ?
+                            case (Success(ph), Success(pk)) if command=="send" => completeRpcFuture(req.id, (paymentInitiator ?
                               SendPayment(amountMsat.toLong, ph, pk)).mapTo[PaymentResult].map {
                               case s: PaymentSucceeded => s
                               case f: PaymentFailed => f.copy(failures = PaymentLifecycle.transformForUser(f.failures))
                             })
                             case (Success(ph), Success(pk)) if command=="sendasync" => completeRpcFuture(req.id, (paymentInitiator ?
-                                SendPayment(amountMsat.toLong, ph, pk, maxFeePct = nodeParams.maxPaymentFee, async=true)).mapTo[SendPaymentId])
+                                SendPayment(amountMsat.toLong, ph, pk, async=true)).mapTo[SendPaymentId])
                             case (Failure(_), _) => reject(RpcValidationRejection(req.id, s"invalid payment hash '$paymentHash'"))
                             case _ => reject(RpcValidationRejection(req.id, s"invalid node id '$nodeId'"))
                           }
@@ -310,7 +312,7 @@ trait Service extends Logging {
                       }
                       
                       //check received payments
-                      case "checkpayment" => req.params match {
+                      case "checkpayment"  => req.params match {
                         case JString(identifier) :: Nil => completeRpcFuture(req.id, for {
                           paymentHash <- Try(PaymentRequest.read(identifier)) match {
                             case Success(pr) => Future.successful(pr.paymentHash)
@@ -323,6 +325,22 @@ trait Service extends Logging {
                         } yield found)
                         case _ => reject(UnknownParamsRejection(req.id, "[paymentHash] or [paymentRequest]"))
                       }
+                                            //check received payments
+                      case "checkpaymentdetails"  => req.params match {
+                        case JString(identifier) :: Nil => completeRpcFuture(req.id, for {
+                          paymentHash <- Try(PaymentRequest.read(identifier)) match {
+                            case Success(pr) => Future.successful(pr.paymentHash)
+                            case _ => Try(BinaryData(identifier)) match {
+                              case Success(s) => Future.successful(s)
+                              case _ => Future.failed(new IllegalArgumentException("payment identifier must be a payment request or a payment hash"))
+                            }
+                          }
+                          found <- (paymentHandler ? CheckPaymentDetailed(paymentHash)).mapTo[CheckPaymentDetailedResponse]
+                        } yield found)
+                        case _ => reject(UnknownParamsRejection(req.id, "[paymentHash] or [paymentRequest]"))
+                      }
+                      
+                      
                       
                       // retrieve audit events
                       case "audit" =>
