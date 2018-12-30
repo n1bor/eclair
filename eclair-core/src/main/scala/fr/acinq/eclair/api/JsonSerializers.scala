@@ -30,7 +30,7 @@ import fr.acinq.eclair.wire._
 import fr.acinq.eclair.{ShortChannelId, UInt64}
 import org.json4s.JsonAST._
 import org.json4s.{CustomKeySerializer, CustomSerializer}
-
+import fr.acinq.eclair.payment.PaymentRequest
 /**
   * JSON Serializers.
   * Note: in general, deserialization does not need to be implemented.
@@ -132,3 +132,18 @@ class DirectionSerializer extends CustomSerializer[Direction](format => ({ null 
   case d: Direction => JString(d.toString)
 }))
 
+class PaymentRequestSerializer extends CustomSerializer[PaymentRequest](format => ({ null },{
+  case p: PaymentRequest => JObject(JField("prefix",JString(p.prefix) ) :: 
+      JField("amount",JLong(p.amount.getOrElse(MilliSatoshi(-1L)).toLong) ) ::
+      JField("timestamp",JLong(p.timestamp) ) ::
+      JField("nodeId",JString(p.nodeId.toString()) ) ::
+      JField("description",JString(
+          p.description match{ case Left(l) => l.toString()
+                               case Right(r) => r.toString() } 
+          ) ) ::
+      
+      JField("paymentHash",JString(p.paymentHash.toString()) ) ::
+      JField("expiry",JLong(p.expiry.getOrElse(-1L)) ) ::
+      JField("minFinalCltvExpiry",JLong(p.minFinalCltvExpiry.getOrElse(-1L)) ) ::
+      Nil)
+}))
